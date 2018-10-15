@@ -83,6 +83,68 @@ export default class {
     }
   }
 
+  /*
+  *   start, end in seconds relative to the entire playlist.
+  */
+  delete(start, end) {
+    // delete 대상 지점을 Buffer 내의 시간에서 찾습니다
+    const trackStart = this.getStartTime();
+    const trackEnd = this.getEndTime();
+    
+    if (end < trackStart) {
+      var newTrackStart = trackStart - (end - start);
+      this.setStartTime(newTrackStart);
+    } else if (start > trackEnd) {
+      // Do Nothing
+    } else {
+      if (start < trackStart) {
+        var deleteStart = this.cueIn;        
+        var newTrackStart = start;
+      } else {
+        var deleteStart = this.cueIn + (start - trackStart); 
+        var newTrackStart = trackStart;
+      }
+        
+      if (trackEnd < end) {
+        var deleteEnd = this.cueOut;   
+        var newTrackEnd = start;
+      } else {
+        var deleteEnd = this.cueIn + (end - trackStart);   
+        var newTrackEnd = start + (trackEnd - end);
+      }
+      
+      const channels = this.buffer.numberOfChannels;
+      const sampleRate = this.buffer.sampleRate;
+      const length = this.buffer.length;
+      
+      deleteStart = secondsToSamples(deleteStart, sampleRate)
+      deleteEnd = secondsToSamples(deleteEnd, sampleRate)
+      const newLength = length - (deleteEnd - deleteStart);
+      
+      if (newLength > 0) {
+        var newBuffer = this.playout.ac.createBuffer(channels, newLength, sampleRate);
+        for (var i = 0; i < channels; i++) {
+          var newChannel = newBuffer.getChannelData(i);
+          var oldChannel = this.buffer.getChannelData(i);
+          newChannel.set(oldChannel.slice(0,deleteStart), 0);
+          newChannel.set(oldChannel.slice(deleteEnd), deleteStart);
+        }
+        this.setBuffer(newBuffer);
+        this.setCues(this.cueIn, this.cueIn + (newTrackEnd-newTrackStart));
+        this.setStartTime(newTrackStart)
+        this.playout.buffer = newBuffer;
+      } else {
+        // webaudio-peaks의 버그로 인한 임시방편 : https://github.com/naomiaro/webaudio-peaks/issues/2
+        if (this.cueIn != 0) {
+          this.setCues(this.cueIn, this.cueIn);
+        } else {
+          this.setCues(1, 1);
+        }
+        this.setStartTime(newTrackStart);
+      }
+    }
+  }
+  
   setStartTime(start) {
     this.startTime = start;
     this.endTime = start + this.duration;

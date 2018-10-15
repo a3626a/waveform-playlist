@@ -47,7 +47,15 @@ export default class {
 
   // TODO extract into a plugin
   initRecorder(stream) {
-    this.mediaRecorder = new window.MediaRecorder(stream);
+    const useMediaRecorder = 'MediaRecorder' in window
+    
+    if (useMediaRecorder) {
+      this.mediaRecorder = new window.MediaRecorder(stream);
+    } else {
+      this.mediaRecorder = new MediaStreamRecorder(stream);
+      this.mediaRecorder.mimeType = 'audio/raw';
+      this.mediaRecorder.audioChannels = 1;
+    }
 
     this.mediaRecorder.onstart = () => {
       const track = new Track();
@@ -62,27 +70,62 @@ export default class {
       this.working = false;
     };
 
-    this.mediaRecorder.ondataavailable = (e) => {
-      this.chunks.push(e.data);
+    if (useMediaRecorder) {
+      this.mediaRecorder.ondataavailable = (e) => {
+        this.chunks.push(e.data);
 
-      // throttle peaks calculation
-      if (!this.working) {
-        const recording = new Blob(this.chunks, { type: 'audio/ogg; codecs=opus' });
-        const loader = LoaderFactory.createLoader(recording, this.ac);
-        loader.load().then((audioBuffer) => {
-          // ask web worker for peaks.
+        // throttle peaks calculation
+        if (!this.working) {
+          const recording = new Blob(this.chunks, { type: 'audio/ogg; codecs=opus' });
+          const loader = LoaderFactory.createLoader(recording, this.ac);
+          loader.load().then((audioBuffer) => {
+            // ask web worker for peaks.
+            this.recorderWorker.postMessage({
+              samples: audioBuffer.getChannelData(0),
+              samplesPerPixel: this.samplesPerPixel,
+            });
+            this.recordingTrack.setCues(0, audioBuffer.duration);
+            this.recordingTrack.setBuffer(audioBuffer);
+            this.recordingTrack.setPlayout(new Playout(this.ac, audioBuffer));
+            this.adjustDuration();
+          });
+          this.working = true;
+        }
+      };
+    } else {
+      this.mediaRecorder.ondataavailable = (e) => {
+        // [e.data]는 채널 수가 1개임을 의미합니다. 채널이 2개라면 [e.data.left, e.data.right]와 같은 형식으로 데이터를 넣어야합니다.
+        this.chunks.push([e.data]);
+        if (!this.working) {
+          this.working = true;
+          var numberOfChannels = this.chunks[0].length;
+
+          var length = 0;
+          for (var i = 0; i < this.chunks.length; i++) {
+            length += this.chunks[i][0].length;
+          }
+          
+          var audioBuffer = this.ac.createBuffer(numberOfChannels, length*numberOfChannels, e.sampleRate);
+        
+          for (var i = 0; i < numberOfChannels; i++) {
+            var channel = audioBuffer.getChannelData(i);
+            var index = 0;
+            for (var j = 0; j < this.chunks.length; j++) {
+              channel.set(this.chunks[j][i], index);
+              index += this.chunks[j][i].length;
+            }
+          }
           this.recorderWorker.postMessage({
             samples: audioBuffer.getChannelData(0),
-            samplesPerPixel: this.samplesPerPixel,
+            samplesPerPixel: this.samplesPerPixel
           });
           this.recordingTrack.setCues(0, audioBuffer.duration);
           this.recordingTrack.setBuffer(audioBuffer);
           this.recordingTrack.setPlayout(new Playout(this.ac, audioBuffer));
           this.adjustDuration();
-        });
-        this.working = true;
-      }
-    };
+        }
+      };
+    }
 
     this.mediaRecorder.onstop = () => {
       this.chunks = [];
@@ -286,6 +329,17 @@ export default class {
       this.drawRequest();
     });
 
+    ee.on('delete', () => {
+      const track = this.getActiveTrack();
+      const timeSelection = this.getTimeSelection();
+
+      track.delete(timeSelection.start, timeSelection.end);
+      track.calculatePeaks(this.samplesPerPixel, this.sampleRate);
+
+      this.setTimeSelection(timeSelection.start, timeSelection.start);
+      this.drawRequest();
+    });
+    
     ee.on('zoomin', () => {
       const zoomIndex = Math.max(0, this.zoomIndex - 1);
       const zoom = this.zoomLevels[zoomIndex];
