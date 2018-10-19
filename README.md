@@ -323,6 +323,7 @@ An example of using the event emitter to control the playlist can be found in [/
 | `zoomin` | _none_ | Changes zoom level to the next smallest entry (if one exists) from the array `zoomLevels`. |
 | `zoomout` | _none_ | Changes zoom level to the next largest entry (if one exists) from the array `zoomLevels`. |
 | `trim` | _none_ | Trims currently active track to the cursor selection. |
+| `delete` | _none_ | Deletes currently active track to the cursor selection. |
 | `statechange` | `cursor` / `select` / `fadein` / `fadeout` / `shift` | Changes interaction state to the state given. |
 | `fadetype` | `logarithmic` / `linear` / `sCurve` / `exponential` | Changes playlist default fade type. |
 | `newtrack` | `File` | Loads `File` object into the playlist. |
